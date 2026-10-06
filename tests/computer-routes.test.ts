@@ -26,6 +26,35 @@ function fixture() {
   return { workspace, id, app };
 }
 
+// `configured: true`, so `allowed()` reaches its permission check instead of
+// failing earlier with "Computer service is not configured."; `transport` is
+// never called because `allowed()` throws before any network request.
+function configuredFixture() {
+  const workspace = new WorkspaceStore(':memory:', 'owner');
+  stores.push(workspace);
+  const id = workspace.dots()[0].id;
+  const config = {
+    baseUrl: 'https://example.com',
+    voiceName: 'voice',
+    slackUsers: [],
+    runtimeUrl: 'http://localhost',
+    computerSupervisorUrl: 'https://supervisor.example.com',
+    computerSupervisorToken: 'supervisor-token',
+    computerToken: 'computer-token',
+  };
+  const transport = () => {
+    throw new Error('transport should not be called in this test');
+  };
+  const service = new ComputerService(
+    workspace,
+    config,
+    () => false,
+    transport,
+  );
+  const app = computerRoutes(service);
+  return { workspace, id, app };
+}
+
 it('answers malformed JSON on the actions route with 400, not a service error', async () => {
   const { app, id } = fixture();
   const response = await app.request(`/dots/${id}/computer/actions`, {
@@ -59,11 +88,34 @@ it('answers an unconfigured computer service with 503, not 400', async () => {
   });
 });
 
-it('answers an unknown Dot id with 503, carrying the domain error message', async () => {
+it('answers an unknown Dot id with 404, not a service error', async () => {
   const { app } = fixture();
   const response = await app.request('/dots/missing/computer/start', {
     method: 'POST',
   });
-  expect(response.status).toBe(503);
+  expect(response.status).toBe(404);
   expect(await response.json()).toEqual({ error: 'Dot not found.' });
+});
+
+it('answers an unknown computer action with 400, not a service error', async () => {
+  const { app, id } = fixture();
+  const response = await app.request(`/dots/${id}/computer/actions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'not_a_real_action', input: {} }),
+  });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: 'Unknown computer action.' });
+});
+
+it('answers a disabled computer permission with 403, not a service error', async () => {
+  const { app, id, workspace } = configuredFixture();
+  workspace.computers.patch(id, { enabled: false });
+  const response = await app.request(`/dots/${id}/computer/take`, {
+    method: 'POST',
+  });
+  expect(response.status).toBe(403);
+  expect(await response.json()).toEqual({
+    error: 'Computer permission is disabled.',
+  });
 });

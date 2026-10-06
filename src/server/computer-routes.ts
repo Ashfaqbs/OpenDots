@@ -7,13 +7,23 @@ export function computerRoutes(computers: ComputerService) {
   app.onError((error, c) => {
     if (error instanceof SyntaxError)
       return c.json({ error: 'Invalid JSON request.' }, 400);
-    const isValidation = error instanceof z.ZodError;
-    return c.json(
-      {
-        error: isValidation ? 'Invalid computer request.' : error.message,
-      },
-      isValidation ? 400 : 503,
-    );
+    if (error instanceof z.ZodError)
+      return c.json({ error: 'Invalid computer request.' }, 400);
+    const text = error.message;
+    if (text === 'Dot not found.') return c.json({ error: text }, 404);
+    if (
+      text === 'Computer permission is disabled.' ||
+      text === 'Human controls are owner-only.'
+    )
+      return c.json({ error: text }, 403);
+    if (
+      text === 'Start this Dot’s computer first.' ||
+      text === 'There is no active control request.'
+    )
+      return c.json({ error: text }, 409);
+    if (text === 'Unknown computer action.')
+      return c.json({ error: text }, 400);
+    return c.json({ error: text }, 503);
   });
   app.get('/dots/:id/computer', async (c) =>
     c.json(await computers.status(c.req.param('id'))),
